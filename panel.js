@@ -4,17 +4,15 @@ const clearBtn = document.getElementById('clear');
 
 // --- CONFIGURATION ---
 const TOPIC_PREFIX = "analytics:"; 
-const TOPIC_KEY = "topic";
+const TOPIC_KEY = "topic"; 
 // ---------------------
 
-// 1. Attach Debugger to the current tab
+let allMessages = [];
 const tabId = chrome.devtools.inspectedWindow.tabId;
 
+// 1. Connection logic
 chrome.debugger.attach({ tabId }, "1.3", () => {
-  if (chrome.runtime.lastError) {
-    console.error(chrome.runtime.lastError.message);
-    return;
-  }
+  if (chrome.runtime.lastError) return;
   chrome.debugger.sendCommand({ tabId }, "Network.enable");
 });
 
@@ -24,16 +22,50 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
     const rawPayload = params.response.payloadData;
     try {
       const json = JSON.parse(rawPayload);
-      const topic = json[TOPIC_KEY];
+      const currentTopic = json[TOPIC_KEY];
 
-    if (topic && typeof topic === 'string' && topic.startsWith(TOPIC_PREFIX)) {
-        addLog(json, topic);
-    }
-    } catch (e) {
-      // Not JSON, ignore
-    }
+      // if (currentTopic && typeof currentTopic === 'string' && currentTopic.startsWith(TOPIC_PREFIX)) {
+        allMessages.push({
+          topic: currentTopic,
+          data: json,
+          time: new Date().toLocaleTimeString()
+        });
+        renderLogs(); 
+      // }
+    } catch (e) { /* Not JSON */ }
   }
 });
+
+// 3. Smart Rendering with Sticky Scroll
+function renderLogs() {
+  const searchTerm = filterInput.value.toLowerCase();
+  
+  // Check if user is at the bottom BEFORE we update the content
+  // We use a 10px threshold to be more forgiving
+  const isAtBottom = logContainer.scrollHeight - logContainer.scrollTop <= logContainer.clientHeight + 10;
+
+  logContainer.innerHTML = '';
+
+  allMessages.forEach(msg => {
+    const strData = JSON.stringify(msg.data).toLowerCase();
+    if (searchTerm && !strData.includes(searchTerm)) return;
+
+    const card = document.createElement('div');
+    card.className = 'message-card';
+    card.innerHTML = `
+      <div class="timestamp">${msg.time} — Topic: <strong>${msg.topic}</strong></div>
+      <pre>${syntaxHighlight(msg.data)}</pre>
+    `;
+    logContainer.appendChild(card);
+  });
+
+  // Only scroll down if they were already at the bottom
+  if (isAtBottom) {
+    logContainer.scrollTop = logContainer.scrollHeight;
+  }
+}
+
+filterInput.addEventListener('input', renderLogs);
 
 function syntaxHighlight(json) {
   if (typeof json !== 'string') json = JSON.stringify(json, null, 2);
@@ -47,25 +79,7 @@ function syntaxHighlight(json) {
   });
 }
 
-function addLog(data, topic) {
-  const searchTerm = filterInput.value.toLowerCase();
-  const strData = JSON.stringify(data).toLowerCase();
-  
-  if (searchTerm && !strData.includes(searchTerm)) return;
-
-  const card = document.createElement('div');
-  card.className = 'message-card';
-  const time = new Date().toLocaleTimeString();
-  
-  card.innerHTML = `
-    <div class="timestamp">${time} - ${topic}</div>
-    <pre>${syntaxHighlight(data)}</pre>
-  `;
-  
-  logContainer.appendChild(card);
-  logContainer.scrollTop = logContainer.scrollHeight; 
-}
-
 clearBtn.onclick = () => {
-  logContainer.innerHTML = '';
+  allMessages = [];
+  renderLogs();
 };
